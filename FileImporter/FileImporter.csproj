@@ -11,7 +11,7 @@
       <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="8.1.1" />
       <PackageReference Include="Jil" Version="2.17.0" />
       <PackageReference Include="Mdl.HostedConsoleApplication" Version="1.0.1" />
-      <PackageReference Include="Microsoft.Extensions.Hosting" Version="5.0.0" />
+      <PackageReference Include="Microsoft.Extensions.Hosting" Version="6.0.0" />
       <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
       <PackageReference Include="System.Buffers" Version="4.5.1" />
       <PackageReference Include="System.Json" Version="4.7.1" />
