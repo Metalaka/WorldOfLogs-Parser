@@ -102,7 +102,7 @@ namespace FileImporter
         {
             writer.Write<int>(entry.Id);
             writer.Write<long>(entry.Report.Id);
-            writer.Write<int>(entry.ActorId);
+            writer.WriteNullable<int>(entry.Actor?.Id);
             writer.WriteNullable<int>(entry.Flags);
         }
         public static void WriteEvent(Event entry, NpgsqlBinaryImporter writer)
