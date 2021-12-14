@@ -12,10 +12,12 @@ namespace FileImporter
     public class DataAdapter
     {
         private readonly DataContext _db;
+        private readonly LogHelper _logHelper;
 
-        public DataAdapter(DataContext db)
+        public DataAdapter(DataContext db, LogHelper logHelper)
         {
             _db = db;
+            _logHelper = logHelper;
         }
 
         public async Task Save(Report[] reports)
@@ -32,13 +34,13 @@ namespace FileImporter
 
                 foreach (var report in reports)
                 {
-                    await NpgsqlBinaryImporterUtils.Save(report.Actors.Values, "public.\"Actors\"", NpgsqlBinaryImporterUtils.WriteActor, connection);
-                    await NpgsqlBinaryImporterUtils.Save(report.FlaggedActors.Values, "public.\"FlaggedActors\"", NpgsqlBinaryImporterUtils.WriteFlaggedActor, connection);
-                    await NpgsqlBinaryImporterUtils.Save(report.Events.Values, "public.\"Events\"", NpgsqlBinaryImporterUtils.WriteEvent, connection, 10_000);
+                    await NpgsqlBinaryImporterUtils.Save(report.Actors.Values, "public.\"Actors\"", NpgsqlBinaryImporterUtils.WriteActor, connection, _logHelper);
+                    await NpgsqlBinaryImporterUtils.Save(report.FlaggedActors.Values, "public.\"FlaggedActors\"", NpgsqlBinaryImporterUtils.WriteFlaggedActor, connection, _logHelper);
+                    await NpgsqlBinaryImporterUtils.Save(report.Events.Values, "public.\"Events\"", NpgsqlBinaryImporterUtils.WriteEvent, connection, _logHelper, 10_000);
                     
                     try
                     {
-                        await NpgsqlBinaryImporterUtils.Save(report.Lines, "public.\"Lines\"", NpgsqlBinaryImporterUtils.WriteLine, connection, 50_000);
+                        await NpgsqlBinaryImporterUtils.Save(report.Lines, "public.\"Lines\"", NpgsqlBinaryImporterUtils.WriteLine, connection, _logHelper, 50_000);
                     }
                     catch (NpgsqlException e) when (e.InnerException is not null && e.InnerException.GetType() == typeof(TimeoutException))
                     {
@@ -135,8 +137,13 @@ namespace FileImporter
             writer.WriteNullable<int>(entry.TargetFlaggedActor?.Id);
             writer.Write<int>(entry.Event.Id);
         }
-        
-        public static async Task Save<T>(ICollection<T> entries, string table, Action<T, NpgsqlBinaryImporter> converter, NpgsqlConnection dbConnection, int step = 500)
+
+        public static async Task Save<T>(ICollection<T> entries,
+            string table,
+            Action<T, NpgsqlBinaryImporter> converter,
+            NpgsqlConnection dbConnection,
+            LogHelper logHelper,
+            int step = 500)
         {
             var i = 0;
             var length = entries.Count;
@@ -147,7 +154,7 @@ namespace FileImporter
 
             foreach (var line in entries)
             {
-                Application.LogProgression(ref i, length, step);
+                logHelper.LogProgression(ref i, length, step);
                 
                 await writer.StartRowAsync();
                 converter(line, writer);

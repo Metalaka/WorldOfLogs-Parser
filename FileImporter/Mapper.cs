@@ -6,47 +6,83 @@ using AutoMapper;
 using Data;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using ActorDto = Domain.Wol.Actor;
-using GuildDto = Domain.Wol.Guild;
-using ReportDto = Domain.Wol.Report;
-using CombatLogDto = Domain.Wol.CombatLog;
-using Guild = Domain.Entities.Guild;
-using Report = Domain.Entities.Report;
-using SimpleQueryDto = Domain.Wol.SimpleQuery;
-using Spell = Domain.Entities.Spell;
-using SpellDto = Domain.Wol.Spell;
 
 namespace FileImporter
 {
+    using Domain;
+
     public class Mapper
     {
         private readonly IMapper _mapper;
         private readonly DataContext _db;
-        
+        private readonly LogHelper _logHelper;
+
         private readonly IDictionary<long, Guild> _guilds = new Dictionary<long, Guild>();
         private readonly IDictionary<string, Report> _reports = new Dictionary<string, Report>();
         private readonly IDictionary<int, Spell> _spells = new Dictionary<int, Spell>();
 
-        public Mapper(IMapper mapper, DataContext db)
+        private Report? _lastReport;
+
+        public Mapper(IMapper mapper, DataContext db, LogHelper logHelper)
         {
             _mapper = mapper;
             _db = db;
+            _logHelper = logHelper;
+        }
+        
+        public void MapSynchronously(Queue<PageData> queue)
+        {
+            var i = 0;
+            var length = queue.Count;
+
+            while (queue.Count > 0)
+            {
+                _logHelper.LogProgression(ref i, length, 500);
+
+                try
+                {
+                    PageData data = queue.Dequeue();
+
+                    Map(data);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                    throw;
+                }
+            }
         }
 
-        public void Map(
-            GuildDto guildDto,
-            ReportDto reportDto,
-            CombatLogDto combatLogDto,
-            SimpleQueryDto simpleQueryDto
-            )
+        public void Map(PageData data)
         {
-            Guild guild = GetOrMapDbValue(guildDto.gid, guildDto, _guilds, _mapper, _db.Guilds, _ => _.Id == guildDto.gid);
-            Report report = GetOrMapValueToDictionary(reportDto.sid, reportDto, _reports, _mapper, entity =>
+            // todo: pre-optimisation to refactor
+            if (data.Guild is not null)
             {
-                entity.Guild = guild;
-            });
+                Guild guild = GetOrMapDbValue(data.Guild.gid, data.Guild, _guilds, _mapper, _db.Guilds, _ => _.Id == data.Guild.gid);
+                _lastReport = GetOrMapValueToDictionary(data.Report.sid, data.Report, _reports, _mapper, entity =>
+                {
+                    entity.Guild = guild;
+                    
+                    Report? report = _db.Reports.FirstOrDefault(_ => _.Sid == entity.Sid);
+                    if (report is not null)
+                    {
+                        entity.Id = report.Id;
+                    }
+                    else
+                    {
+                        throw new ApplicationException();
+                    }                    
+                });
+            }
 
-            foreach (var dto in combatLogDto.spells)
+            if (_lastReport is null)
+            {
+                throw new ApplicationException("No report found");
+            }
+            
+            Report report = _lastReport;
+
+            foreach (var dto in data.CombatLog.spells)
             {
                 GetOrMapDbValue(dto.id, dto, _spells, _mapper, _db.Spells, _ => _.Id == dto.id, entity =>
                 {
@@ -57,7 +93,7 @@ namespace FileImporter
             
             // todo: actors, flaggedActors, events, lines don't need to be mapped for the import
             
-            foreach (var dto in combatLogDto.actors)
+            foreach (var dto in data.CombatLog.actors)
             {
                 GetOrMapValueToDictionary(dto.id, dto, report.Actors, _mapper, entity =>
                 {
@@ -65,7 +101,7 @@ namespace FileImporter
                 });
             }
 
-            foreach (var dto in combatLogDto.flaggedActors)
+            foreach (var dto in data.CombatLog.flaggedActors)
             {
                 GetOrMapValueToDictionary(dto.id, dto, report.FlaggedActors, _mapper, entity =>
                 {
@@ -74,7 +110,7 @@ namespace FileImporter
                 });
             }
             
-            foreach (var dto in combatLogDto.events)
+            foreach (var dto in data.CombatLog.events)
             {
                 GetOrMapValueToDictionary(dto.id, dto, report.Events, _mapper, entity =>
                 {
@@ -85,9 +121,9 @@ namespace FileImporter
                 });
             }
 
-            foreach (var lineId in simpleQueryDto.lines)
+            foreach (var lineId in data.SimpleQuery.lines)
             {
-                int[]? dto = combatLogDto.entries.FirstOrDefault(_ => _[0] == lineId);
+                int[]? dto = data.CombatLog.entries.FirstOrDefault(_ => _[0] == lineId);
 
                 if (dto is null)
                 {
@@ -122,7 +158,7 @@ namespace FileImporter
             return _reports.Values;
         }
 
-        private static IEnumerable<School> ProcessSchools(DbSet<School> schools, SpellDto spellDto)
+        private static IEnumerable<School> ProcessSchools(DbSet<School> schools, Domain.Wol.Spell spellDto)
         {
             var schoolFlags = spellDto.school;
             var queue = new Queue<string>(spellDto.schools);
