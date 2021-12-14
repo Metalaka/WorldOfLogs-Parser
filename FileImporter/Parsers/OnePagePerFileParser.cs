@@ -1,22 +1,86 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.IO;
-using System.Json;
-using System.Linq;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Domain.Wol;
-using Jil;
-using Newtonsoft.Json;
-using JsonSerializer = System.Text.Json.JsonSerializer;
-
-namespace FileImporter
+﻿namespace FileImporter.Parsers
 {
-    public class Parser
+    using System;
+    using System.Collections.Generic;
+    using System.IO;
+    using System.Json;
+    using System.Linq;
+    using System.Threading.Tasks;
+    using Domain;
+    using Domain.Wol;
+    using Jil;
+
+    public class OnePagePerFileParser : IParser
     {
-        public (int, (Guild, Report, CombatLog, SimpleQuery)) Run(string path, int startOffset, bool checkJson = false)
+        private readonly LogHelper _logHelper;
+
+        public OnePagePerFileParser(LogHelper logHelper)
+        {
+            _logHelper = logHelper;
+        }
+
+        public PageData[] ParseFiles(string[] files)
+        {
+            return ParseFilesAsParallel(files);
+        }
+        
+        private PageData[] ParseFilesAsParallel(string[] files)
+        {
+            bool hasError = false;
+            int i = 0;
+            int length = files.Length;
+            PageData[] dtos = new PageData[length];
+
+            Parallel.ForEach(files /*.Take(10)*/, file =>
+            {
+                _logHelper.LogProgression(ref i, length, 500);
+
+                try
+                {
+                    PageData dto = Run(file, 2400);
+                    dtos[dto.Page] = dto;
+                }
+                catch (Exception e)
+                {
+                    hasError = true;
+                    Console.Error.WriteLineAsync($"Error parsing {file}: {e.Message}");
+                }
+            });
+
+            if (hasError)
+            {
+                Console.Out.WriteLine($"HasError: Exiting...");
+
+                throw new ApplicationException();
+            }
+
+            return dtos;
+        }
+
+        private PageData[] ParseFilesSynchronously(string[] files)
+        {
+            var i = 0;
+            var length = files.Length;
+            var dtos = new PageData[length];
+            foreach (var file in files)
+            {
+                _logHelper.LogProgression(ref i, length, 500);
+
+                try
+                {
+                    var dto = Run(file, 2400);
+                    dtos[dto.Page] = dto;
+                }
+                catch (Exception e)
+                {
+                    Console.Error.WriteLineAsync($"Error parsing {file}: {e.Message}");
+                }
+            }
+
+            return dtos;
+        }
+
+        private static PageData Run(string path, int startOffset, bool checkJson = false)
         {
             var content = File.ReadAllText(path).AsSpan(startOffset);
 
@@ -37,13 +101,13 @@ namespace FileImporter
                     .ToArray();
                 CheckJson(combatLogJson.ToString(), 5, "events", eventProperties);
             }
-            
+
             // Newtonsoft
             // var guild = JsonConvert.DeserializeObject<Guild>(guildJson.ToString());
             // var report = JsonConvert.DeserializeObject<Report>(reportJson.ToString());
             // var combatLog = JsonConvert.DeserializeObject<CombatLog>(combatLogJson.ToString());
-            
-            
+
+
             // System.Text.Json
             /*var options = new JsonSerializerOptions()
             {
@@ -54,31 +118,35 @@ namespace FileImporter
             var combatLog = JsonSerializer.Deserialize<CombatLog>(combatLogJson.ToString(), options);
             var simpleQuery = JsonConvert.DeserializeObject<SimpleQuery>(simpleQueryJson.ToString(), options);
             /**/
-            
+
             // jil
-            var guild = JSON.Deserialize<Guild>(guildJson.ToString());
-            var report = JSON.Deserialize<Report>(reportJson.ToString());
-            var combatLog = JSON.Deserialize<CombatLog>(combatLogJson.ToString());
-            var simpleQuery = JSON.Deserialize<SimpleQuery>(simpleQueryJson.ToString());
+
+            PageData dto = new();
+            dto.Page = page;
+            dto.Guild = JSON.Deserialize<Guild>(guildJson.ToString());
+            dto.Report = JSON.Deserialize<Report>(reportJson.ToString());
+            dto.CombatLog = JSON.Deserialize<CombatLog>(combatLogJson.ToString());
+            dto.SimpleQuery = JSON.Deserialize<SimpleQuery>(simpleQueryJson.ToString());
 
 
-            return (page, (guild, report, combatLog, simpleQuery));
+            return dto;
         }
-        
-        private static ReadOnlySpan<char> ExtractString(ReadOnlySpan<char> content, ReadOnlySpan<char> from, ReadOnlySpan<char> to)
+
+        private static ReadOnlySpan<char> ExtractString(ReadOnlySpan<char> content, ReadOnlySpan<char> from,
+            ReadOnlySpan<char> to)
         {
             for (int x = 0; x <= content.Length - from.Length; x++)
             {
                 if (content.Slice(x, from.Length).SequenceEqual(from))
                 {
-                    var result = content[(x+from.Length)..];
+                    var result = content[(x + from.Length)..];
                     return result[..result.IndexOf(to)];
                 }
             }
 
             return default;
         }
-        
+
         private static void CheckJson(string json, int length, string key, IEnumerable<string> array)
         {
             JsonValue value = JsonValue.Parse(json);
@@ -104,9 +172,9 @@ namespace FileImporter
                     throw new ApplicationException("a member of the array isn't an object");
                 }
 
-                JsonObject jo = (JsonObject)o;
-                
-                keys.AddRange(jo.Keys/*.Where(_ => !keys.Contains(_))*/);
+                JsonObject jo = (JsonObject) o;
+
+                keys.AddRange(jo.Keys /*.Where(_ => !keys.Contains(_))*/);
             }
 
             var a = keys.Distinct().Select(_ => _.ToLowerInvariant()).Distinct()
@@ -117,6 +185,5 @@ namespace FileImporter
                 throw new ApplicationException($"unhandled event fields: {string.Join(", ", a)}");
             }
         }
-
     }
 }

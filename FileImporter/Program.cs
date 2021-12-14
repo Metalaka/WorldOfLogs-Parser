@@ -9,6 +9,8 @@ using Microsoft.Extensions.Logging;
 
 namespace FileImporter
 {
+    using FileImporter.Parsers;
+
     class Program
     {
         static async Task Main(string[] args)
@@ -26,7 +28,9 @@ namespace FileImporter
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
-                    services.AddTransient<Parser>();
+                    services.AddSingleton<LogHelper>();
+                    services.AddTransient<OneLogPerFileParser>();
+                    services.AddTransient<OnePagePerFileParser>();
                     services.AddTransient<Mapper>();
                     services.AddTransient<DataAdapter>();
 
